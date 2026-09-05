@@ -15,7 +15,7 @@ services:
       retries: 10
 
   app:
-    build: .
+    image: notakari/mangayomi-sync-server:latest
     restart: unless-stopped
     env_file: .env
     depends_on:
@@ -27,7 +27,7 @@ services:
       - avatar_storage:/app/storage
 
   migrate:
-    build: .
+    image: notakari/mangayomi-sync-server:latest
     profiles: ["init"]
     env_file: .env
     entrypoint: []
