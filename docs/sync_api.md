@@ -101,13 +101,16 @@ either side has more than one page's worth of changes (see Pagination).
   // (see Pagination). If one entity has more than 5000 changed rows, the
   // client splits it across more than one call on its own.
   "categories": [ { "clientId": 1, "name": "Reading", "forItemType": "MANGA", ... } ],
-  "manga":      [ { "clientId": 42, "link": "...", "name": "...", ... } ],
+  // "categoryClientIds" replaces this manga's whole category membership.
+  // Left out entirely (not an empty array) means "don't touch its categories".
+  "manga":      [ { "clientId": 42, "link": "...", "name": "...", "categoryClientIds": [1], ... } ],
   "chapters":   [ { "clientId": 501, "mangaClientId": 42, "url": "...", "isRead": true, ... } ],
   "tracks":     [ ... ],
   "histories":  [ ... ],
   "updates":    [ ... ],
-  // Always sent, holds the app's reader settings blob.
-  "settings": { "updatedAt": 1735500500000, /* ...fields */ },
+  // Always sent, holds the app's reader settings blob. "data" is opaque to the
+  // server (whatever object shape the client wants), only "updatedAt" is read.
+  "settings": { "data": { /* ...settings fields */ }, "updatedAt": 1735500500000 },
 
   // Rows deleted locally since the last sync, by clientId.
   "deleted": {
@@ -194,7 +197,11 @@ database id, which stays on the device and is never sent.
   // the clientId this device just sent to the one it should use from now
   // on. The client must rewrite its local row's clientId to match, or it
   // will keep uploading the same manga as a new duplicate on every sync.
-  "mangaClientIdRemap": { "42": 99 }
+  "mangaClientIdRemap": { "42": 99 },
+
+  // Same idea as mangaClientIdRemap, but for a chapter this device tracked
+  // independently before ever syncing with whichever device added it first.
+  "chapterClientIdRemap": { "501": 777 }
 }
 ```
 

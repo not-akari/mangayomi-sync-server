@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import type { SentMessageInfo } from "nodemailer";
 import type { ServerSettings } from "@prisma/client";
+import { decryptSecret } from "@/lib/auth/secret-crypto";
 
 type SmtpSettings = Pick<
   ServerSettings,
@@ -27,7 +28,12 @@ function buildTransporter(
     port: settings.smtpPort ?? 587,
     secure: settings.smtpSecure,
     auth: settings.smtpUser
-      ? { user: settings.smtpUser, pass: settings.smtpPassword ?? undefined }
+      ? {
+          user: settings.smtpUser,
+          pass: settings.smtpPassword
+            ? decryptSecret(settings.smtpPassword)
+            : undefined,
+        }
       : undefined,
   });
 }

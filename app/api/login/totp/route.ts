@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth/session";
 import { userRepository } from "@/lib/repositories/user-repository";
 import { verifyTotpCode, hashRecoveryCode } from "@/lib/auth/totp";
+import { decryptSecret } from "@/lib/auth/secret-crypto";
 import { verifyPendingTotpToken } from "@/lib/auth/totp-pending-token";
 import { auditLogRepository } from "@/lib/repositories/audit-log-repository";
 import { checkRateLimit, isBodyTooLarge } from "@/lib/api/rate-limit";
@@ -53,7 +54,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   let usedRecoveryCode = false;
   let recoveryCodesRemaining: number | undefined;
   if (isTotpCode) {
-    if (!verifyTotpCode(user.totpSecret, code)) {
+    if (!verifyTotpCode(decryptSecret(user.totpSecret), code)) {
       return NextResponse.json(
         { error: t("totp.invalidCode") },
         { status: 401 },

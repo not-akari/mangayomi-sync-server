@@ -116,8 +116,9 @@ export async function upsertCategories(
   client: DbClient,
   userId: string,
   rows: CategoryInput[],
-): Promise<Set<number>> {
+): Promise<{ applied: Set<number>; idByClientId: Map<number, bigint> }> {
   const applied = new Set<number>();
+  const idByClientId = new Map<number, bigint>();
   for (const row of rows) {
     const incomingUpdatedAt = toBigIntMs(row.updatedAt);
     const data: Prisma.CategoryUncheckedCreateInput = {
@@ -130,7 +131,7 @@ export async function upsertCategories(
       shouldUpdate: row.shouldUpdate ?? true,
       updatedAt: incomingUpdatedAt,
     };
-    const { applied: wasApplied } = await upsertIfNewer(
+    const { id, applied: wasApplied } = await upsertIfNewer(
       () =>
         client.category.findUnique({
           where: {
@@ -142,15 +143,32 @@ export async function upsertCategories(
         client.category.update({ where: { id: existing.id }, data }),
       incomingUpdatedAt,
     );
+    idByClientId.set(row.clientId, id);
     if (wasApplied) applied.add(row.clientId);
   }
-  return applied;
+  return { applied, idByClientId };
+}
+
+// categoryId resolution for clientIds a manga upload references but that weren't part of
+// this same request's own category upload (already synced in an earlier cycle).
+export async function resolveExistingCategoryIds(
+  client: DbClient,
+  userId: string,
+  clientIds: number[],
+): Promise<Map<number, bigint>> {
+  if (clientIds.length === 0) return new Map();
+  const rows = await client.category.findMany({
+    where: { userId, clientId: { in: clientIds.map(toBigIntId) } },
+    select: { id: true, clientId: true },
+  });
+  return new Map(rows.map((r) => [fromBigIntId(r.clientId), r.id]));
 }
 
 export async function upsertManga(
   client: DbClient,
   userId: string,
   rows: MangaInput[],
+  categoryIdByClientId: Map<number, bigint>,
 ): Promise<{
   applied: Set<number>;
   idByClientId: Map<number, bigint>;
@@ -205,6 +223,21 @@ export async function upsertManga(
       const canonicalClientId = fromBigIntId(existing.clientId);
       if (canonicalClientId !== row.clientId)
         remap.set(row.clientId, canonicalClientId);
+    }
+    // Category membership lives on the same row client-side, so it's only trustworthy
+    // (and only relinked) when this same upload just won the newest-wins check above.
+    // Omitted entirely means an older client that doesn't send this field - leave links alone.
+    if (wasApplied && row.categoryClientIds !== undefined) {
+      const categoryIds = row.categoryClientIds
+        .map((clientId) => categoryIdByClientId.get(clientId))
+        .filter((v): v is bigint => v !== undefined);
+      await client.mangaCategory.deleteMany({ where: { mangaId: id } });
+      if (categoryIds.length > 0) {
+        await client.mangaCategory.createMany({
+          data: categoryIds.map((categoryId) => ({ mangaId: id, categoryId })),
+          skipDuplicates: true,
+        });
+      }
     }
   }
   return { applied, idByClientId, remap };
@@ -334,8 +367,8 @@ export async function upsertTracks(
       totalChapter: row.totalChapter ?? null,
       score: row.score ?? null,
       status: row.status ?? "READING",
-      startedReadingDate: row.startedReadingDate ?? null,
-      finishedReadingDate: row.finishedReadingDate ?? null,
+      startedReadingDate: toBigIntMsOrNull(row.startedReadingDate),
+      finishedReadingDate: toBigIntMsOrNull(row.finishedReadingDate),
       trackingUrl: row.trackingUrl ?? null,
       itemType: row.itemType,
       updatedAt: incomingUpdatedAt,

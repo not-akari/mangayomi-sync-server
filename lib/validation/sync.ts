@@ -5,6 +5,8 @@ import { SYNC } from "@/lib/config";
 
 // Client-generated, stable across syncs for the same row, wide enough for negligible collisions. See sync-repository.ts's toBigIntId.
 const clientIdSchema = z.number().int().safe().positive();
+// No real library organizes one title into more than a handful of folders; this only guards against a malformed payload.
+const MAX_CATEGORIES_PER_MANGA = 200;
 const itemTypeSchema = z.enum(["MANGA", "ANIME", "NOVEL"]);
 const statusSchema = z.enum([
   "ONGOING",
@@ -58,6 +60,13 @@ export const mangaSchema = z.object({
   isLocalArchive: z.boolean().optional(),
   customCoverFromTracker: z.string().max(2000).nullable().optional(),
   smartUpdateDays: z.number().int().nullable().optional(),
+  // The full set of categories this manga belongs to, replacing whatever MangaCategory
+  // rows exist server-side for it. Omitted means "leave links untouched" (an older or
+  // partial client that doesn't know about this field), an empty array means "in no category".
+  categoryClientIds: z
+    .array(clientIdSchema)
+    .max(MAX_CATEGORIES_PER_MANGA)
+    .optional(),
   updatedAt: z.number(),
 });
 
@@ -91,8 +100,8 @@ export const trackSchema = z.object({
   totalChapter: z.number().int().nullable().optional(),
   score: z.number().nullable().optional(),
   status: trackStatusSchema.optional(),
-  startedReadingDate: z.string().max(50).nullable().optional(),
-  finishedReadingDate: z.string().max(50).nullable().optional(),
+  startedReadingDate: z.number().nullable().optional(),
+  finishedReadingDate: z.number().nullable().optional(),
   trackingUrl: z
     .string()
     .max(2000)

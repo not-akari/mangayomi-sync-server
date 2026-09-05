@@ -36,7 +36,8 @@ model User {
   registeredIpHash        String?
   maxLibraryBytesOverride Int?
   blurNsfw                Boolean      @default(false)
-  // Base32 secret, stored plain since it must be checked against, not just verified.
+  // Base32 secret, encrypted at rest (lib/auth/secret-crypto.ts) - it has to be
+  // readable back to compute a code against, so it can't be hashed like a password.
   totpSecret          String?
   totpEnabled         Boolean  @default(false)
   totpRecoveryCodeHashes String[] @default([])
@@ -457,8 +458,8 @@ model Track {
   totalChapter        Int?
   score               Float?
   status              TrackStatus @default(READING)
-  startedReadingDate  String?
-  finishedReadingDate String?
+  startedReadingDate  BigInt?
+  finishedReadingDate BigInt?
   trackingUrl         String?
   itemType            ItemType
   updatedAt           BigInt      @default(0)

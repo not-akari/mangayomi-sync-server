@@ -27,7 +27,7 @@
 .vscode/
 .directory
 
-/.github
+
 
 # debug
 npm-debug.log*

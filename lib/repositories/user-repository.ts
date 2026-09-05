@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import type { AdminScope, Prisma, Role, User } from "@prisma/client";
 import type { DbClient } from "./client";
+import { encryptSecret } from "@/lib/auth/secret-crypto";
 
 export const userRepository = {
   findByUsername(
@@ -143,7 +144,11 @@ export const userRepository = {
   ): Promise<User> {
     return client.user.update({
       where: { id },
-      data: { totpSecret, totpEnabled: true, totpRecoveryCodeHashes },
+      data: {
+        totpSecret: encryptSecret(totpSecret),
+        totpEnabled: true,
+        totpRecoveryCodeHashes,
+      },
     });
   },
 

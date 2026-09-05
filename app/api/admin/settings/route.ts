@@ -4,6 +4,7 @@ import { z } from "zod";
 import { serverSettingsRepository } from "@/lib/repositories/server-settings-repository";
 import { auditLogRepository } from "@/lib/repositories/audit-log-repository";
 import { requireScope, parseJsonBody } from "@/lib/api/api-guards";
+import { encryptSecret } from "@/lib/auth/secret-crypto";
 import {
   PASSWORD_LENGTH,
   SESSION,
@@ -116,6 +117,8 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   if (data.smtpUser === "") data.smtpUser = null;
   if (data.smtpFrom === "") data.smtpFrom = null;
   if (data.smtpPassword === "") data.smtpPassword = null;
+  else if (data.smtpPassword)
+    data.smtpPassword = encryptSecret(data.smtpPassword);
   if (data.publicAppUrl === "") data.publicAppUrl = null;
   else if (data.publicAppUrl)
     data.publicAppUrl = data.publicAppUrl.replace(/\/+$/, "");

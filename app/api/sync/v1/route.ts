@@ -3,7 +3,11 @@ import { getTranslations } from "next-intl/server";
 import { withTransaction } from "@/lib/repositories/transaction";
 import { syncRequestSchema } from "@/lib/validation/sync";
 import { checkFixedWindowLimit, isBodyTooLarge } from "@/lib/api/rate-limit";
-import { requireUser, parseJsonBody, tooManyRequests } from "@/lib/api/api-guards";
+import {
+  requireUser,
+  parseJsonBody,
+  tooManyRequests,
+} from "@/lib/api/api-guards";
 import {
   issueSyncSessionToken,
   verifySyncSessionToken,
@@ -19,6 +23,7 @@ import {
   pullTombstones,
   pullTracks,
   pullUpdates,
+  resolveExistingCategoryIds,
   resolveExistingChapterIds,
   resolveExistingMangaIds,
   upsertCategories,
@@ -55,10 +60,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     SYNC.dailyCircuitBreaker,
   );
   if (!dailyCheck.allowed) {
-    return tooManyRequests(
-      dailyCheck.retryAfterSeconds,
-      t("syncTooManyToday"),
-    );
+    return tooManyRequests(dailyCheck.retryAfterSeconds, t("syncTooManyToday"));
   }
 
   const isContinuation = verifySyncSessionToken(req.sessionToken, userId);
@@ -68,10 +70,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       SYNC.freshLimit,
     );
     if (!freshCheck.allowed) {
-      return tooManyRequests(
-        freshCheck.retryAfterSeconds,
-        t("syncTooManyNow"),
-      );
+      return tooManyRequests(freshCheck.retryAfterSeconds, t("syncTooManyNow"));
     }
   }
 
@@ -79,16 +78,37 @@ export async function POST(request: Request): Promise<NextResponse> {
     async (client) => {
       const now = BigInt(Date.now());
 
-      const appliedCategories = req.categories?.length
+      const { applied: appliedCategories, idByClientId: categoryIds } = req
+        .categories?.length
         ? await upsertCategories(client, userId, req.categories)
-        : new Set<number>();
+        : {
+            applied: new Set<number>(),
+            idByClientId: new Map<number, bigint>(),
+          };
+
+      // Categories a manga upload references but that weren't themselves part of this
+      // upload (synced in an earlier cycle already).
+      const referencedCategoryClientIds = new Set<number>();
+      for (const m of req.manga ?? [])
+        for (const cid of m.categoryClientIds ?? [])
+          referencedCategoryClientIds.add(cid);
+      const missingCategoryClientIds = [...referencedCategoryClientIds].filter(
+        (id) => !categoryIds.has(id),
+      );
+      const existingCategoryIds = await resolveExistingCategoryIds(
+        client,
+        userId,
+        missingCategoryClientIds,
+      );
+      for (const [clientId, id] of existingCategoryIds)
+        categoryIds.set(clientId, id);
 
       const {
         applied: appliedManga,
         idByClientId: mangaIds,
         remap: mangaClientIdRemap,
       } = req.manga?.length
-        ? await upsertManga(client, userId, req.manga)
+        ? await upsertManga(client, userId, req.manga, categoryIds)
         : {
             applied: new Set<number>(),
             idByClientId: new Map<number, bigint>(),

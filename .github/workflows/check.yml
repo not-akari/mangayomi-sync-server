@@ -1,0 +1,112 @@
+name: Check
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: check
+          POSTGRES_PASSWORD: check
+          POSTGRES_DB: sync_check
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://check:check@localhost:5432/sync_check
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck + lint
+        run: npm run check
+
+      - name: Build the app
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t sync-mangayomi:check .
+
+      # --network host so the container can reach postgres and port 3000 directly.
+      - name: Start the container
+        run: |
+          docker run -d --name sync-check \
+            --network host \
+            -e SESSION_SECRET="ci-check-only-secret-never-used-for-anything-real" \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e TRUST_PROXY_HEADERS="false" \
+            sync-mangayomi:check
+
+      - name: Wait for it to come up
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000 > /dev/null; then
+              echo "Server responded, it's alive."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server never became reachable. Container logs:"
+          docker logs sync-check
+          exit 1
+
+      - name: Shut down the container
+        if: always()
+        run: docker rm -f sync-check
+
+      - name: Check complete
+        run: echo "check complete"
+
+  publish:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Docker tag is the git tag without its leading "v" (v1.2.0 -> 1.2.0).
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: notakari/mangayomi-sync-server:${{ steps.version.outputs.version }}

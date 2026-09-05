@@ -142,7 +142,10 @@ export async function pullManga(
       where,
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: PULL_PAGE_SIZE + 1,
-      include: { catalogEntry: true },
+      include: {
+        catalogEntry: true,
+        categories: { select: { category: { select: { clientId: true } } } },
+      },
     }),
     cursor === null
       ? client.manga.count({ where: { userId, updatedAt: { gte: since } } })
@@ -171,6 +174,9 @@ export async function pullManga(
       isLocalArchive: r.isLocalArchive,
       customCoverFromTracker: r.customCoverFromTracker,
       smartUpdateDays: r.smartUpdateDays,
+      categoryClientIds: r.categories.map((c) =>
+        fromBigIntId(c.category.clientId),
+      ),
       updatedAt: fromBigIntMs(r.updatedAt),
     })),
     hasMore,
@@ -269,8 +275,8 @@ export async function pullTracks(
       totalChapter: r.totalChapter,
       score: r.score,
       status: r.status,
-      startedReadingDate: r.startedReadingDate,
-      finishedReadingDate: r.finishedReadingDate,
+      startedReadingDate: fromBigIntMsOrNull(r.startedReadingDate),
+      finishedReadingDate: fromBigIntMsOrNull(r.finishedReadingDate),
       trackingUrl: r.trackingUrl,
       itemType: r.itemType,
       updatedAt: fromBigIntMs(r.updatedAt),

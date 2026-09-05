@@ -8,12 +8,7 @@ import type {
   updateSchema,
 } from "@/lib/validation/sync";
 import type { z } from "zod";
-import type {
-  ItemType,
-  Prisma,
-  Status,
-  TrackStatus,
-} from "@prisma/client";
+import type { ItemType, Prisma, Status, TrackStatus } from "@prisma/client";
 
 // Wire shapes for the pull side, mirroring the request schemas but as plain interfaces built from Prisma results.
 export interface WireCategory {
@@ -46,6 +41,7 @@ export interface WireManga {
   isLocalArchive: boolean;
   customCoverFromTracker: string | null;
   smartUpdateDays: number | null;
+  categoryClientIds: number[];
   updatedAt: number;
 }
 export interface WireChapter {
@@ -76,8 +72,8 @@ export interface WireTrack {
   totalChapter: number | null;
   score: number | null;
   status: TrackStatus;
-  startedReadingDate: string | null;
-  finishedReadingDate: string | null;
+  startedReadingDate: number | null;
+  finishedReadingDate: number | null;
   trackingUrl: string | null;
   itemType: ItemType;
   updatedAt: number;
@@ -141,7 +137,9 @@ export function fromBigIntId(n: bigint): number {
 }
 
 // Only overwrites when the incoming row is actually newer, and reports whether it was so the pull side can skip echoing it back.
-export async function upsertIfNewer<Row extends { id: bigint; updatedAt: bigint }>(
+export async function upsertIfNewer<
+  Row extends { id: bigint; updatedAt: bigint },
+>(
   find: () => Promise<Row | null>,
   create: () => Promise<Row>,
   update: (existing: Row) => Promise<Row>,
