@@ -46,6 +46,12 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      # Generates .next/types (LayoutProps/PageProps etc.) that tsc needs - a
+      # fresh checkout has no .next/ yet, unlike a machine that's already run
+      # dev/build locally.
+      - name: Generate Next.js route types
+        run: npx next typegen
+
       - name: Typecheck + lint
         run: npm run check
 
