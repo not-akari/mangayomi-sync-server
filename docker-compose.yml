@@ -1,41 +1,41 @@
 services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mangayomi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mangayomi}
+      POSTGRES_DB: ${POSTGRES_DB:-mangayomi_sync}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mangayomi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   app:
     build: .
-    container_name: mangayomi-sync-server
     restart: unless-stopped
     env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     volumes:
       - avatar_storage:/app/storage
-    networks:
-      - postgres_default
-      - arrifin_media-network
+
   migrate:
     build: .
     profiles: ["init"]
     env_file: .env
     entrypoint: []
     command: ["npx", "prisma", "migrate", "deploy"]
-    networks:
-      - postgres_default
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
+  postgres_data:
   avatar_storage:
-
-networks:
-  # Both are stacks that already exist on this host, joined here rather than
-  # created - `external: true` means "attach to it", not "make a new network
-  # with this name".
-  #
-  # postgres_default: the standalone Postgres stack. Reach it as `postgres`
-  # on its internal port 5432, never the host-mapped ${POSTGRES_PORT}.
-  #
-  # arrifin_media-network: the network cloudflared listens on. Point the
-  # tunnel's ingress rule at http://mangayomi-sync-server:3000 (the
-  # container_name above, on this network's internal port - the
-  # host-published ${PORT} isn't needed for that path at all).
-  postgres_default:
-    external: true
-  arrifin_media-network:
-    external: true

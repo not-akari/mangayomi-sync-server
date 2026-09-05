@@ -38,6 +38,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# Personal deployment overrides - keep these local, never committed.
+docker-compose.external.yml
+docker-compose.override.yml
+
 # vercel
 .vercel
 
