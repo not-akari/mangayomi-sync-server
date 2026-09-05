@@ -1,0 +1,527 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AdminScope {
+  MANAGE_INVITES
+  MANAGE_USERS
+  VIEW_LOGS
+  MANAGE_SETTINGS
+  MANAGE_REPORTS
+}
+
+// An account. `username` is the login handle (the wire format still calls it "email");
+// `isPrimaryAdmin` marks the permanent bootstrap account that can't be demoted or suspended.
+model User {
+  id                      String       @id @default(cuid())
+  username                String       @unique
+  email                   String?      @unique
+  passwordHash            String
+  role                    Role         @default(USER)
+  scopes                  AdminScope[]
+  isPrimaryAdmin          Boolean      @default(false)
+  createdAt               DateTime     @default(now())
+  avatarUrl               String?
+  suspended               Boolean      @default(false)
+  suspendedReason         String?
+  registeredIpHash        String?
+  maxLibraryBytesOverride Int?
+  blurNsfw                Boolean      @default(false)
+  // Base32 secret, stored plain since it must be checked against, not just verified.
+  totpSecret          String?
+  totpEnabled         Boolean  @default(false)
+  totpRecoveryCodeHashes String[] @default([])
+
+  sessions       Session[]
+  invitesCreated InviteCode[]      @relation("InvitesCreated")
+  invitePresetsCreated InvitePreset[] @relation("InvitePresetsCreated")
+  invitedBy      InviteRedemption?
+  reports        Report[]
+  reportMessages ReportMessage[]
+  resetTokens    PasswordResetToken[]
+  oauthCodes     OAuthCode[]
+  settings       Settings?
+  auditLogs      AuditLog[]
+  mangas         Manga[]
+  categories     Category[]
+  chapterStates  ChapterState[]
+  tracks         Track[]
+  histories      History[]
+  updates        Update[]
+  tombstones     Tombstone[]
+
+  @@index([username])
+}
+
+// One row per logged-in device. `id` is the JWT's `jti`, so `revoked` kills a session
+// instantly (logout, ban) without waiting for the token to expire.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+
+  @@index([userId])
+}
+
+// Backs rate limiting, one row per (route, caller) key, in Postgres so limits survive
+// restarts and are shared across multiple app instances.
+model RateLimitAttempt {
+  key           String   @id
+  attemptCount  Int      @default(0)
+  lastAttemptAt DateTime @default(now())
+
+  @@index([lastAttemptAt])
+}
+
+enum AuditAction {
+  USER_REGISTERED
+  USER_LOGIN
+  INVITE_CREATED
+  INVITE_REVOKED
+  ROLE_CHANGED
+  SETTINGS_CHANGED
+  PASSWORD_CHANGED
+  ACCOUNT_DELETED
+  ACCOUNT_SUSPENDED
+  ACCOUNT_REINSTATED
+  PASSWORD_RESET_LINK_CREATED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  EMAIL_CHANGED
+  AVATAR_CHANGED
+  REPORT_CREATED
+  REPORT_STATUS_CHANGED
+  REPORT_REPLY_CREATED
+  SESSION_REVOKED
+  CATALOG_NSFW_OVERRIDE_SET
+  CATALOG_NSFW_BULK_OVERRIDE_SET
+  TOTP_ENABLED
+  TOTP_DISABLED
+  TOTP_RECOVERY_CODE_USED
+}
+
+// Append-only security log. `actorUsername` is a snapshot taken at write time, so
+// entries stay readable even after the account is renamed or deleted.
+model AuditLog {
+  id            String      @id @default(cuid())
+  actorId       String?
+  actor         User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorUsername String
+  action        AuditAction
+  targetId      String?
+  metadata      Json?
+  createdAt     DateTime    @default(now())
+
+  @@index([createdAt])
+}
+
+// A registration invite. `grantedRole`/`grantedScopes`/`maxLibraryBytesOverride` apply
+// to whoever redeems it.
+model InviteCode {
+  id            String       @id @default(cuid())
+  code          String       @unique
+  createdById   String?
+  createdBy     User?        @relation("InvitesCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  maxUses       Int?         @default(1) // null = unlimited
+  useCount      Int          @default(0)
+  expiresAt     DateTime?
+  revoked       Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  label         String?
+  grantedRole   Role         @default(USER)
+  grantedScopes AdminScope[]
+  maxLibraryBytesOverride Int?
+
+  redemptions InviteRedemption[]
+
+  @@index([code])
+}
+
+// A saved set of invite defaults for the creation form; a UI convenience only, not
+// referenced by the invite once created.
+model InvitePreset {
+  id                      String       @id @default(cuid())
+  name                    String       @unique
+  maxUses                 Int?         @default(1)
+  expiresInDays           Int?
+  grantedRole             Role         @default(USER)
+  grantedScopes           AdminScope[]
+  maxLibraryBytesOverride Int?
+  createdById             String?
+  createdBy               User?        @relation("InvitePresetsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt               DateTime     @default(now())
+}
+
+// One row per redeemed invite, one per account.
+model InviteRedemption {
+  id           String     @id @default(cuid())
+  inviteCodeId String
+  inviteCode   InviteCode @relation(fields: [inviteCodeId], references: [id])
+  userId       String     @unique
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  redeemedAt   DateTime   @default(now())
+}
+
+enum ReportStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  REJECTED
+}
+
+// A user-submitted support/abuse note. `userId` is nullable so a locked-out, logged-out
+// user can still file one via the typed contact fields.
+model Report {
+  id              String       @id @default(cuid())
+  userId          String?
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contactUsername String?
+  contactInfo     String?
+  subject         String
+  message         String
+  status          ReportStatus @default(PENDING)
+  adminNote       String?
+  createdAt       DateTime     @default(now())
+  resolvedAt      DateTime?
+  messages        ReportMessage[]
+
+  @@index([status, createdAt])
+  @@index([userId])
+}
+
+// A message/reply in a report conversation thread.
+model ReportMessage {
+  id        String   @id @default(cuid())
+  reportId  String
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  senderId  String?
+  sender    User?    @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  isAdmin   Boolean  @default(false)
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([reportId, createdAt])
+}
+
+// A one-time, expiring, hashed reset link, shared by admin-initiated and self-service
+// (email) password resets.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// A one-time, expiring, hashed authorization code for the app's OAuth login.
+model OAuthCode {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash      String    @unique
+  codeChallenge String
+  redirectUri   String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// One opaque JSON blob per account holding the app's own client-defined preferences;
+// the server never interprets what's inside.
+model Settings {
+  userId    String @id
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt BigInt @default(0)
+}
+
+enum RegistrationMode {
+  OPEN
+  INVITE_ONLY
+}
+
+// Server-wide config, a singleton row (id is always 1).
+model ServerSettings {
+  id                     Int              @id @default(1)
+  registrationMode       RegistrationMode @default(INVITE_ONLY)
+  maintenanceMode        Boolean          @default(false)
+  sessionDurationDays    Int              @default(30)
+  siteName               String?
+  avatarsEnabled         Boolean          @default(true)
+  maxAvatarBytes         Int              @default(2097152) // 2MB
+  allowAvatarUrl         Boolean          @default(true)
+  minPasswordLength      Int              @default(8)
+  defaultMaxLibraryBytes Int?
+  publicAppUrl           String?
+  allowedOrigins         String[]         @default([])
+  nsfwGenreTags          String[]         @default(["Hentai", "Ecchi", "Adult", "Mature", "Smut", "Erotica", "NSFW", "Pornographic", "Explicit Sex", "Sexual Content", "Nudity", "Rape", "Incest", "MILF", "Doujinshi", "Borderline H", "M18Scan", "Uncensored", "Prostitution", "Sexual Abuse", "Ahegao", "Anal", "Ball Sucking", "Blowjob", "Bondage", "Breast Expansion", "Breast Feeding", "Bukkake", "Cervix Penetration", "Cosplay Ero", "Cosplay Nude", "Cumflation", "Deepthroat", "Double Penetration", "Enema", "Exhibitionism", "Femdom", "Threesome", "Gaping", "Gokkun", "Handjob", "Huge Breasts", "Huge Penis", "Impregnation", "Inflation", "Lactation", "Masturbation", "Milking", "Mind Break", "Mosaic Censorship", "Nakadashi", "Netorare", "Nipple Fuck", "Orgasm Denial", "Paizuri", "Piss Drinking", "Prolapse", "Rimjob", "Scat", "Smegma", "Squirting", "Tailjob", "Vaginal Birth", "Big Areolae", "Big Ass", "Big Clit", "Big Nipples", "Big Penis", "Fetish", "Urination", "Loli", "Futanari", "Bestiality", "Guro", "BDSM", "Tentacle", "Yiff", "Voyeur"])
+  nsfwSymbols            String[]         @default(["♀"])
+  nsfwKeywords           String[]         @default(["hentai", "ecchi", "adult", "mature", "smut", "erotica", "nsfw", "pornographic", "explicit sex", "sexual content", "nudity", "sex", "rape", "incest", "milf", "doujinshi", "borderline h", "m18scan", "uncensored", "prostitution", "sexual abuse", "ahegao", "anal", "ball sucking", "blowjob", "bondage", "breast expansion", "breast feeding", "bukkake", "cervix penetration", "cosplay ero", "cosplay nude", "cumflation", "deepthroat", "double penetration", "enema", "exhibitionism", "femdom", "threesome", "gaping", "gokkun", "handjob", "huge breasts", "huge penis", "impregnation", "inflation", "lactation", "masturbation", "milking", "mind break", "mosaic censorship", "nakadashi", "netorare", "nipple fuck", "orgasm denial", "paizuri", "piss drinking", "prolapse", "rimjob", "scat", "smegma", "squirting", "tailjob", "vaginal birth", "big areolae", "big ass", "big clit", "big nipples", "big penis", "fetish", "urination", "loli", "futanari", "bestiality", "guro", "bdsm", "tentacle", "yiff", "voyeur"])
+  smtpHost               String?
+  smtpPort               Int?
+  smtpSecure             Boolean          @default(false)
+  smtpUser               String?
+  smtpPassword           String?
+  smtpFrom               String?
+  updatedAt              DateTime         @updatedAt
+}
+
+enum ItemType {
+  MANGA
+  ANIME
+  NOVEL
+}
+
+enum Status {
+  ONGOING
+  COMPLETED
+  CANCELED
+  UNKNOWN
+  ON_HIATUS
+  PUBLISHING_FINISHED
+}
+
+// A title's shared, scraped facts, one row per (source, link), no matter how many
+// accounts have it in their library.
+model CatalogEntry {
+  id          BigInt   @id @default(autoincrement())
+  source      String?
+  sourceId    Int?
+  link        String?
+  itemType    ItemType
+  name        String?
+  imageUrl    String?
+  description String?
+  author      String?
+  artist      String?
+  status      Status   @default(UNKNOWN)
+  genre       String[]
+  lang        String?
+  lastUpdate  BigInt?
+  updatedAt   BigInt   @default(0)
+  nsfwOverride Boolean?
+
+  mangas   Manga[]
+  chapters CatalogChapter[]
+
+  @@unique([source, link])
+  @@index([itemType])
+}
+
+// A user's library folder.
+model Category {
+  id           BigInt   @id @default(autoincrement())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId     BigInt
+  name         String
+  forItemType  ItemType
+  pos          Int?
+  hide         Boolean  @default(false)
+  shouldUpdate Boolean  @default(true)
+  updatedAt    BigInt   @default(0)
+
+  mangaLinks MangaCategory[]
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+}
+
+// A user's library entry: their relationship to a CatalogEntry, not the title's data
+// itself. Two users with the same manga each get one thin row here.
+model Manga {
+  id                     BigInt       @id @default(autoincrement())
+  userId                 String
+  user                   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId               BigInt
+  catalogEntryId         BigInt
+  catalogEntry           CatalogEntry @relation(fields: [catalogEntryId], references: [id])
+  favorite               Boolean      @default(false)
+  dateAdded              BigInt?
+  lastRead               BigInt?
+  isLocalArchive         Boolean      @default(false)
+  customCoverFromTracker String?
+  smartUpdateDays        Int?
+  updatedAt              BigInt       @default(0)
+
+  categories    MangaCategory[]
+  chapterStates ChapterState[]
+  tracks        Track[]
+  histories     History[]
+  updates       Update[]
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+  @@index([catalogEntryId])
+}
+
+// Join table between Manga and Category.
+model MangaCategory {
+  mangaId    BigInt
+  manga      Manga    @relation(fields: [mangaId], references: [id], onDelete: Cascade)
+  categoryId BigInt
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([mangaId, categoryId])
+}
+
+// A chapter/episode's shared facts, one row per (catalogEntryId, url), no matter how
+// many accounts have the parent title.
+model CatalogChapter {
+  id             BigInt       @id @default(autoincrement())
+  catalogEntryId BigInt
+  catalogEntry   CatalogEntry @relation(fields: [catalogEntryId], references: [id], onDelete: Cascade)
+  name           String?
+  url            String?
+  scanlator      String?
+  dateUpload     BigInt?
+  isFiller       Boolean      @default(false)
+  thumbnailUrl   String?
+  description    String?
+  downloadSize   Int?
+  duration       Int?
+  updatedAt      BigInt       @default(0)
+
+  chapterStates ChapterState[]
+  updates       Update[]
+
+  @@unique([catalogEntryId, url])
+  @@index([catalogEntryId, updatedAt])
+}
+
+// A user's read state for one chapter, the only genuinely per-user part of a chapter.
+model ChapterState {
+  id               BigInt         @id @default(autoincrement())
+  userId           String
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId         BigInt
+  mangaId          BigInt
+  manga            Manga          @relation(fields: [mangaId], references: [id], onDelete: Cascade)
+  catalogChapterId BigInt
+  catalogChapter   CatalogChapter @relation(fields: [catalogChapterId], references: [id])
+  isRead           Boolean        @default(false)
+  isBookmarked     Boolean        @default(false)
+  lastPageRead     String?
+  updatedAt        BigInt         @default(0)
+
+  histories History[]
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+  @@index([userId, mangaId])
+  @@index([catalogChapterId])
+}
+
+enum TrackStatus {
+  READING
+  COMPLETED
+  ON_HOLD
+  DROPPED
+  PLAN_TO_READ
+  RE_READING
+  WATCHING
+  PLAN_TO_WATCH
+  RE_WATCHING
+}
+
+// A user's tracker link (MyAnimeList, AniList, etc.) for one manga.
+model Track {
+  id                  BigInt      @id @default(autoincrement())
+  userId              String
+  user                User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId            BigInt
+  mangaId             BigInt
+  manga               Manga       @relation(fields: [mangaId], references: [id], onDelete: Cascade)
+  syncId              Int?
+  mediaId             Int?
+  libraryId           Int?
+  title               String?
+  lastChapterRead     Float?
+  totalChapter        Int?
+  score               Float?
+  status              TrackStatus @default(READING)
+  startedReadingDate  String?
+  finishedReadingDate String?
+  trackingUrl         String?
+  itemType            ItemType
+  updatedAt           BigInt      @default(0)
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+}
+
+// A user's reading/watching history entry.
+model History {
+  id                 BigInt       @id @default(autoincrement())
+  userId             String
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId           BigInt
+  mangaId            BigInt
+  manga              Manga        @relation(fields: [mangaId], references: [id], onDelete: Cascade)
+  chapterStateId     BigInt
+  chapterState       ChapterState @relation(fields: [chapterStateId], references: [id], onDelete: Cascade)
+  itemType           ItemType
+  date               BigInt?
+  readingTimeSeconds Int          @default(0)
+  updatedAt          BigInt       @default(0)
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+}
+
+// A "new chapter available" notice for a user's manga.
+model Update {
+  id          BigInt          @id @default(autoincrement())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId    BigInt
+  mangaId     BigInt
+  manga       Manga           @relation(fields: [mangaId], references: [id], onDelete: Cascade)
+  chapterName String?
+  chapterId   BigInt?
+  chapter     CatalogChapter? @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+  date        BigInt?
+  updatedAt   BigInt          @default(0)
+
+  @@unique([userId, clientId])
+  @@index([userId, updatedAt])
+  @@index([userId, mangaId, chapterName])
+}
+
+enum EntityType {
+  CATEGORY
+  MANGA
+  CHAPTER
+  TRACK
+  HISTORY
+  UPDATE
+}
+
+// A deletion marker, so other devices know a row was removed rather than just missing.
+model Tombstone {
+  id         BigInt     @id @default(autoincrement())
+  userId     String
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entityType EntityType
+  clientId   BigInt
+  deletedAt  BigInt
+
+  @@index([userId, entityType, deletedAt])
+}

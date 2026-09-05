@@ -1,0 +1,9 @@
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE 'TOTP_ENABLED';
+ALTER TYPE "AuditAction" ADD VALUE 'TOTP_DISABLED';
+ALTER TYPE "AuditAction" ADD VALUE 'TOTP_RECOVERY_CODE_USED';
+
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "totpSecret" TEXT,
+ADD COLUMN     "totpEnabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "totpRecoveryCodeHashes" TEXT[] DEFAULT ARRAY[]::TEXT[];

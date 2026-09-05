@@ -1,0 +1,16 @@
+node_modules
+.next
+out
+build
+storage
+.git
+.env*
+!.env.example
+.vercel
+*.tsbuildinfo
+npm-debug.log*
+.DS_Store
+.idea
+.vscode
+coverage
+

@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    volumes:
+      - avatar_storage:/app/storage
+  migrate:
+    build: .
+    profiles: ["init"]
+    env_file: .env
+    entrypoint: []
+    command: ["npx", "prisma", "migrate", "deploy"]
+
+volumes:
+  avatar_storage:
