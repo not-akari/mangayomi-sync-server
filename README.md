@@ -10,8 +10,6 @@ A self-hostable sync server for [Mangayomi](https://github.com/kodjodevf/mangayo
 - Tailwind v4 + shadcn/ui
 - next-intl for i18n
 
-This project doesn't bundle its own Postgres, bring your own instance and point `DATABASE_URL` at it.
-
 ## Getting started (Docker, recommended)
 
 1. **Configure environment**: copy `.env.example` to `.env`, fill in `SESSION_SECRET` (`openssl rand -base64 48`) and `DATABASE_URL`. If Postgres runs on the same host machine, use `host.docker.internal` in the connection string instead of `localhost`, since `localhost` inside a container means the container itself.
