@@ -115,4 +115,6 @@ jobs:
         with:
           context: .
           push: true
-          tags: notakari/mangayomi-sync-server:${{ steps.version.outputs.version }}
+          tags: |
+            notakari/mangayomi-sync-server:${{ steps.version.outputs.version }}
+            notakari/mangayomi-sync-server:latest
